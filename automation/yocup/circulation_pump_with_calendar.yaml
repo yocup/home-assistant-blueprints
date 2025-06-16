@@ -1,8 +1,8 @@
 blueprint:
   name: Circulation Pump Control with Calendar
   description: >
-    Turns a switch ON and OFF at specified times, but only during active events
-    from two calendar entities (e.g., rentals). Turns OFF at end of event as well.
+    Turns a switch ON and OFF at specified times (if within active rental periods)
+    from two calendar entities. Turns OFF at the end of events and off-times.
   domain: automation
   input:
     calendar_1:
@@ -21,27 +21,27 @@ blueprint:
         entity:
           domain: input_boolean
     on_times:
-      name: Turn ON Times (24h format)
-      description: List of times to turn ON the pump (e.g., 08:00, 15:00)
-      default: []
+      name: Turn ON Times (comma-separated, 24h format)
+      description: >
+        Comma-separated list of times to turn ON the pump (e.g., 08:00,15:00)
+      default: ""
       selector:
-        time: {}
-        multiple: true
+        text:
     off_times:
-      name: Turn OFF Times (24h format)
-      description: List of times to turn OFF the pump (e.g., 12:00, 21:00)
-      default: []
+      name: Turn OFF Times (comma-separated, 24h format)
+      description: >
+        Comma-separated list of times to turn OFF the pump (e.g., 12:00,21:00)
+      default: ""
       selector:
-        time: {}
-        multiple: true
+        text:
 
 mode: parallel
 
 trigger:
   - platform: time
-    at: !input on_times
-  - platform: time
-    at: !input off_times
+    at: "00:00"  # Dummy fallback, real logic in conditions
+  - platform: time_pattern
+    minutes: "/1"
   - platform: state
     entity_id: !input calendar_1
     to: "off"
@@ -53,6 +53,7 @@ condition: []
 
 action:
   - choose:
+      # Turn ON at specified times IF rental is active
       - conditions:
           - condition: or
             conditions:
@@ -64,18 +65,21 @@ action:
                 state: "on"
           - condition: template
             value_template: >
-              {{ now().strftime('%H:%M') in iif(is_defined(blueprint.input.on_times), blueprint.input.on_times, []) }}
+              {% set on_times = (blueprint.input.on_times or "").replace(" ", "").split(",") %}
+              {{ now().strftime('%H:%M') in on_times }}
         sequence:
           - service: input_boolean.turn_on
             target:
               entity_id: !input pump_switch
 
+      # Turn OFF at specified times OR when both calendars are inactive
       - conditions:
           - condition: or
             conditions:
               - condition: template
                 value_template: >
-                  {{ now().strftime('%H:%M') in iif(is_defined(blueprint.input.off_times), blueprint.input.off_times, []) }}
+                  {% set off_times = (blueprint.input.off_times or "").replace(" ", "").split(",") %}
+                  {{ now().strftime('%H:%M') in off_times }}
               - condition: and
                 conditions:
                   - condition: state
