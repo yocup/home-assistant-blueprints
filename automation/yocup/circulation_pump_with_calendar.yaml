@@ -1,92 +1,93 @@
 blueprint:
-  name: Circulation Pump Control with Calendar
+  name: Circulation Pump Calendar Control
   description: >
-    Turns a switch ON and OFF at specified times (only during active events)
-    from two calendar entities. Also turns OFF at the end of the rental period.
+    Controls a circulation pump switch (input_boolean) based on calendar state and time.
+
+    - Turns ON the switch at 08:00 and 16:00 *if* either Airbnb or private rental calendars are active.
+    - Turns OFF the switch at 12:00 and 21:00, or when both calendars are OFF.
   domain: automation
   input:
-    calendar_1:
-      name: First Calendar Entity
-      selector:
-        entity:
-          domain: calendar
-    calendar_2:
-      name: Second Calendar Entity
-      selector:
-        entity:
-          domain: calendar
-    pump_switch:
-      name: Switch or Input Boolean for Circulation Pump
+    switch_entity:
+      name: Circulation Pump Switch
+      description: The input_boolean used to control the circulation pump
       selector:
         entity:
           domain: input_boolean
-    on_times:
-      name: Turn ON Times (comma-separated, 24h format)
-      description: >
-        Comma-separated list of times to turn ON the pump (e.g., 08:00,15:00)
-      default: ""
+    calendar_airbnb:
+      name: Airbnb Rental Calendar
       selector:
-        text:
-    off_times:
-      name: Turn OFF Times (comma-separated, 24h format)
-      description: >
-        Comma-separated list of times to turn OFF the pump (e.g., 12:00,21:00)
-      default: ""
+        entity:
+          domain: calendar
+    calendar_private:
+      name: Private Rental Calendar
       selector:
-        text:
-
-mode: parallel
+        entity:
+          domain: calendar
 
 trigger:
-  - platform: time_pattern
-    minutes: "/1"
+  - platform: time
+    at: "08:00:00"
+    id: turn_on_morning
+  - platform: time
+    at: "12:00:00"
+    id: turn_off_noon
+  - platform: time
+    at: "16:00:00"
+    id: turn_on_afternoon
+  - platform: time
+    at: "21:00:00"
+    id: turn_off_evening
   - platform: state
-    entity_id: !input calendar_1
+    entity_id:
+      - !input calendar_airbnb
+      - !input calendar_private
     to: "off"
-  - platform: state
-    entity_id: !input calendar_2
-    to: "off"
+    id: turn_off_end_of_rental
 
 condition: []
 
 action:
   - choose:
-      # Turn ON at specific times IF any calendar is active
       - conditions:
           - condition: or
             conditions:
+              - condition: trigger
+                id: turn_on_morning
+              - condition: trigger
+                id: turn_on_afternoon
+          - condition: or
+            conditions:
               - condition: state
-                entity_id: !input calendar_1
+                entity_id: !input calendar_airbnb
                 state: "on"
               - condition: state
-                entity_id: !input calendar_2
+                entity_id: !input calendar_private
                 state: "on"
-          - condition: template
-            value_template: >
-              {% set on_times = (blueprint.input.on_times or "").replace(" ", "").split(",") %}
-              {{ now().strftime('%H:%M') in on_times }}
         sequence:
           - service: input_boolean.turn_on
             target:
-              entity_id: !input pump_switch
+              entity_id: !input switch_entity
 
-      # Turn OFF at specific times OR when both calendars are inactive
       - conditions:
           - condition: or
             conditions:
-              - condition: template
-                value_template: >
-                  {% set off_times = (blueprint.input.off_times or "").replace(" ", "").split(",") %}
-                  {{ now().strftime('%H:%M') in off_times }}
+              - condition: trigger
+                id: turn_off_noon
+              - condition: trigger
+                id: turn_off_evening
               - condition: and
                 conditions:
+                  - condition: trigger
+                    id: turn_off_end_of_rental
                   - condition: state
-                    entity_id: !input calendar_1
+                    entity_id: !input calendar_airbnb
                     state: "off"
                   - condition: state
-                    entity_id: !input calendar_2
+                    entity_id: !input calendar_private
                     state: "off"
         sequence:
           - service: input_boolean.turn_off
             target:
-              entity_id: !input pump_switch
+              entity_id: !input switch_entity
+
+mode: parallel
